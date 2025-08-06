@@ -16,6 +16,8 @@ router = APIRouter()
 class WorkerStatusUpdate(BaseModel):
     task_id: str
     document_id: str
+    operation_type: Optional[str] = "processing"  # "deletion" | "processing"
+    # Default to processing for backward compatibility
     status: str
     chunks: List[Any]
     error: Optional[str] = None
@@ -35,20 +37,34 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
     Receive status updates from the worker service.
     This endpoint is called by the worker to report processing status.
     """
-    logger.info(f"Received worker status update: {update.status} " f"for document {update.document_id}")
+    logger.info(
+        f"Received worker status update: {update.status} "
+        f"for document {update.document_id}, "
+        f"operation_type: {update.operation_type}"
+    )
 
     try:
-        # Map worker status to backend status
-        status_mapping = {
-            "completed": ProcessingStatus.COMPLETED,
-            "failed": ProcessingStatus.FAILED,
-            "processing": ProcessingStatus.PROCESSING,
-            "pending": ProcessingStatus.PENDING,
-            "deletion_completed": ProcessingStatus.COMPLETED,  # Document deleted successfully
-            "deletion_failed": ProcessingStatus.DELETE_ERROR,  # Document deletion failed
-        }
-
-        backend_status = status_mapping.get(update.status, ProcessingStatus.PROCESSING)
+        # Map worker status to backend status based on operation type
+        if update.operation_type == "deletion":
+            if update.status == "completed":
+                # Document deleted successfully
+                backend_status = ProcessingStatus.COMPLETED
+            elif update.status == "failed":
+                # Document deletion failed
+                backend_status = ProcessingStatus.DELETE_ERROR
+            else:
+                # Document is being deleted
+                backend_status = ProcessingStatus.DELETING
+        else:  # processing operation
+            status_mapping = {
+                "completed": ProcessingStatus.COMPLETED,
+                "failed": ProcessingStatus.FAILED,
+                "processing": ProcessingStatus.PROCESSING,
+                "pending": ProcessingStatus.PENDING,
+            }
+            backend_status = status_mapping.get(
+                update.status, ProcessingStatus.PROCESSING
+            )
 
         # Update document status in backend database
         update_data: Dict[str, Any] = {"chunks_count": len(update.chunks)}
@@ -89,7 +105,9 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
                 # Don't fail the entire status update if chunk saving fails
 
         # Send WebSocket update to frontend
-        logger.info(f"Sending WebSocket update for status: {update.status}")
+        logger.info(
+            f"Sending WebSocket update for status: {update.status}"
+        )
 
         # Get WebSocket manager from router
         websocket_manager = getattr(router, "websocket_manager", None)
@@ -100,9 +118,25 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
                 "message": "WebSocket manager not available",
             }
 
-        if update.status == "completed":
+        logger.info(
+            f"Operation: {update.operation_type}, Status: {update.status}, "
+            f"Stage: {update.stage}, Message: {update.message}"
+        )
+        
+        if update.status == "completed" and update.operation_type == "processing":
             logger.info(f"Sending processing complete for task {update.task_id}")
             await websocket_manager.send_processing_complete(update.task_id, update.document_id)
+        elif update.status == "completed" and update.operation_type == "deletion":
+            logger.info(f"Document deletion completed for {update.document_id}")
+            await websocket_manager.send_document_deleted_success(update.document_id)
+            # Delete the document record from database
+            logger.info(
+                f"Deleting document {update.document_id} from database"
+            )
+            await get_document_service().delete_document(update.document_id)
+            logger.info(
+                f"Successfully deleted document {update.document_id} from database"
+            )
         elif update.status == "failed":
             error_msg = update.error or "Processing failed"
             logger.error(f"Sending error notification for task {update.task_id}: " f"{error_msg}")
@@ -124,7 +158,7 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
             progress = update.progress if update.progress is not None else (50 if update.status == "processing" else 0)
             stage = update.stage if update.stage else update.status
             message = update.message if update.message else f"Worker status: {update.status}"
-            
+
             logger.info(f"Sending progress update for task {update.task_id}: " f"{progress}% - {stage}")
             await websocket_manager.send_progress_update(
                 update.task_id,
