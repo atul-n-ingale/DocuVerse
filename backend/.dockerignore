@@ -1,0 +1,30 @@
+# Exclude macOS-generated lock file to avoid platform conflicts
+poetry.lock
+
+# Exclude development files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exclude OS files
+.DS_Store
+Thumbs.db
+
+# Exclude logs
+*.log
+
+# Exclude uploads (will be created in container)
+uploads/ 

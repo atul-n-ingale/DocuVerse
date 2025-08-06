@@ -1,0 +1,129 @@
+services:
+  # nlm ingestor service
+  nlm_ingestor:
+    image: ghcr.io/nlmatics/nlm-ingestor:latest
+    container_name: nlm-ingestor
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    networks:
+      - docuverse-network
+
+  # MongoDB
+  mongodb:
+    image: mongo:6.0
+    container_name: docuverse-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: docuverse
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docuverse-network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: docuverse-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docuverse-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docuverse-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./uploads:/app/uploads
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - docuverse-network
+
+  # Worker (Celery)
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: docuverse-worker
+    restart: unless-stopped
+    env_file:
+      - ./worker/.env
+    volumes:
+      - ./uploads:/app/uploads
+      - ./worker:/app
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - docuverse-network
+
+  # Flower - Celery Monitoring
+  flower:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: docuverse-flower
+    restart: unless-stopped
+    command: celery -A app.celery_app flower --port=5555
+    env_file:
+      - ./worker/.env
+    ports:
+      - "5555:5555"
+    depends_on:
+      worker:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - docuverse-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: docuverse-frontend
+    environment:
+      - REACT_APP_API_URL=http://backend:8000/api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - docuverse-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  docuverse-network:
+    driver: bridge 
