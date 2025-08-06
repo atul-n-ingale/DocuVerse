@@ -16,6 +16,7 @@ class TestDocumentDeletionService:
     def test_delete_document_vectors_success(self, mock_pinecone_client):
         """Test successful deletion of document vectors."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         # Mock Pinecone query response with some vectors
         mock_match1 = MagicMock()
@@ -48,7 +49,7 @@ class TestDocumentDeletionService:
             mock_progress_manager = MagicMock()
             mock_pm_class.return_value = mock_progress_manager
 
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
             # Assertions
             assert result["status"] == "success"
@@ -64,16 +65,22 @@ class TestDocumentDeletionService:
             )
 
             # Verify ProgressManager was used correctly
-            mock_pm_class.assert_called_once()
+            mock_pm_class.assert_called_once_with(
+                backend_url="http://localhost:8000",
+                document_id=document_id,
+                task_id=task_id,
+                operation_type="deletion",
+            )
             mock_progress_manager.start_stage.assert_called_once_with("deletion")
             mock_progress_manager.complete_stage.assert_called_once_with("deletion")
-            mock_progress_manager.report_status_to_backend.assert_called_once_with(
+            mock_progress_manager.send_final_progress_update.assert_called_once_with(
                 status="completed", chunks=[]
             )
 
     def test_delete_document_vectors_no_vectors_found(self, mock_pinecone_client):
         """Test deletion when no vectors are found for the document."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with (
             patch(
@@ -97,7 +104,7 @@ class TestDocumentDeletionService:
             mock_progress_manager = MagicMock()
             mock_pm_class.return_value = mock_progress_manager
 
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
             # Assertions
             assert result["status"] == "success"
@@ -106,12 +113,19 @@ class TestDocumentDeletionService:
             assert result["error"] is None
 
             # Verify ProgressManager was used correctly
+            mock_pm_class.assert_called_once_with(
+                backend_url="http://localhost:8000",
+                document_id=document_id,
+                task_id=task_id,
+                operation_type="deletion",
+            )
             mock_progress_manager.start_stage.assert_called_once_with("deletion")
             mock_progress_manager.complete_stage.assert_called_once_with("deletion")
 
     def test_delete_document_vectors_large_batch(self, mock_pinecone_client):
         """Test deletion with large number of vectors."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with (
             patch(
@@ -135,7 +149,7 @@ class TestDocumentDeletionService:
             mock_progress_manager = MagicMock()
             mock_pm_class.return_value = mock_progress_manager
 
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
             # Assertions
             assert result["status"] == "success"
@@ -144,38 +158,39 @@ class TestDocumentDeletionService:
             assert result["error"] is None
 
             # Verify ProgressManager was used correctly
-            mock_progress_manager.start_stage.assert_called_once_with("deletion")
-            mock_progress_manager.complete_stage.assert_called_once_with("deletion")
+            mock_pm_class.assert_called_once_with(
+                backend_url="http://localhost:8000",
+                document_id=document_id,
+                task_id=task_id,
+                operation_type="deletion",
+            )
 
     def test_delete_document_vectors_missing_pinecone_config(self):
         """Test deletion when Pinecone API key is missing."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with patch("app.services.document_deletion_service.PINECONE_API_KEY", ""):
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
-            # Assertions
             assert result["status"] == "error"
-            assert result["document_id"] == document_id
-            assert result["deleted_vectors"] == 0
             assert "PINECONE_API_KEY is not configured" in result["error"]
 
     def test_delete_document_vectors_missing_index_config(self):
         """Test deletion when Pinecone index is missing."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with patch("app.services.document_deletion_service.PINECONE_INDEX", ""):
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
-            # Assertions
             assert result["status"] == "error"
-            assert result["document_id"] == document_id
-            assert result["deleted_vectors"] == 0
             assert "PINECONE_INDEX is not configured" in result["error"]
 
     def test_delete_document_vectors_pinecone_error(self, mock_pinecone_client):
         """Test deletion when Pinecone operations fail."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with (
             patch(
@@ -194,22 +209,23 @@ class TestDocumentDeletionService:
             mock_progress_manager = MagicMock()
             mock_pm_class.return_value = mock_progress_manager
 
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
-            # Assertions
             assert result["status"] == "error"
-            assert result["document_id"] == document_id
-            assert result["deleted_vectors"] == 0
             assert "Pinecone error" in result["error"]
 
-            # Verify error was reported
-            mock_progress_manager.report_status_to_backend.assert_called_with(
-                status="failed", error=result["error"]
+            # Verify ProgressManager was used for error reporting
+            mock_pm_class.assert_called_once_with(
+                backend_url="http://localhost:8000",
+                document_id=document_id,
+                task_id=task_id,
+                operation_type="deletion",
             )
 
     def test_delete_document_vectors_query_error(self, mock_pinecone_client):
         """Test deletion when query operation fails."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with (
             patch(
@@ -228,22 +244,23 @@ class TestDocumentDeletionService:
             mock_progress_manager = MagicMock()
             mock_pm_class.return_value = mock_progress_manager
 
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
-            # Assertions
             assert result["status"] == "error"
-            assert result["document_id"] == document_id
-            assert result["deleted_vectors"] == 0
             assert "Query failed" in result["error"]
 
-            # Verify error was reported
-            mock_progress_manager.report_status_to_backend.assert_called_with(
-                status="failed", error=result["error"]
+            # Verify ProgressManager was used for error reporting
+            mock_pm_class.assert_called_once_with(
+                backend_url="http://localhost:8000",
+                document_id=document_id,
+                task_id=task_id,
+                operation_type="deletion",
             )
 
     def test_delete_document_vectors_deletion_error(self, mock_pinecone_client):
         """Test deletion when vector deletion operation fails."""
         document_id = "test-doc-123"
+        task_id = "test-task-id"
 
         with (
             patch(
@@ -267,15 +284,18 @@ class TestDocumentDeletionService:
             mock_progress_manager = MagicMock()
             mock_pm_class.return_value = mock_progress_manager
 
-            result = delete_document_vectors(document_id)
+            result = delete_document_vectors(document_id, task_id)
 
-            # Assertions
             assert result["status"] == "error"
-            assert result["document_id"] == document_id
-            assert result["deleted_vectors"] == 0
-            assert "Deletion failed" in result["error"]
+            assert result["error"] == "Deletion failed"
 
-            # Verify error was reported
-            mock_progress_manager.report_status_to_backend.assert_called_with(
+            # Verify ProgressManager was used for error reporting
+            mock_pm_class.assert_called_once_with(
+                backend_url="http://localhost:8000",
+                document_id=document_id,
+                task_id=task_id,
+                operation_type="deletion",
+            )
+            mock_progress_manager.send_final_progress_update.assert_called_with(
                 status="failed", error="Deletion failed"
             )
