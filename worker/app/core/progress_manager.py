@@ -24,7 +24,13 @@ class ProgressManager:
     relays them to the frontend via WebSocket connections.
     """
 
-    def __init__(self, backend_url: str, document_id: str, task_id: str, operation_type: str = "processing"):
+    def __init__(
+        self,
+        backend_url: str,
+        document_id: str,
+        task_id: str,
+        operation_type: str = "processing",
+    ):
         """
         Initialize the progress manager.
 

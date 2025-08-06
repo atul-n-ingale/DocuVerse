@@ -79,7 +79,10 @@ class TestDocumentProcessorService:
 
             # Verify ProgressManager was used
             mock_pm_class.assert_called_once_with(
-                backend_url=BACKEND_URL, document_id="doc-456", task_id="task-123"
+                backend_url=BACKEND_URL,
+                document_id="doc-456",
+                task_id="task-123",
+                operation_type="processing",
             )
             mock_progress_manager.report_status_to_backend.assert_called_once_with(
                 "processing"
@@ -120,7 +123,10 @@ class TestDocumentProcessorService:
 
             # Verify ProgressManager was used
             mock_pm_class.assert_called_once_with(
-                backend_url=BACKEND_URL, document_id="doc-456", task_id="task-123"
+                backend_url=BACKEND_URL,
+                document_id="doc-456",
+                task_id="task-123",
+                operation_type="processing",
             )
             mock_progress_manager.report_status_to_backend.assert_called_once_with(
                 "processing"

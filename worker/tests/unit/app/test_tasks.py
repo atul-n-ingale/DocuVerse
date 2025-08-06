@@ -109,7 +109,7 @@ class TestCeleryTasks:
 
             # Assertions
             assert result == expected_result
-            mock_delete.assert_called_once_with(document_id)
+            mock_delete.assert_called_once_with(document_id, None)
 
     def test_delete_document_task_error_result(self):
         """Test document deletion task when service returns error."""
@@ -128,7 +128,7 @@ class TestCeleryTasks:
             with pytest.raises(Exception, match="Document deletion failed"):
                 delete_document_task.run(document_id)
 
-            mock_delete.assert_called_once_with(document_id)
+            mock_delete.assert_called_once_with(document_id, None)
 
     def test_delete_document_task_service_exception(self):
         """Test document deletion task when service raises exception."""
@@ -141,7 +141,7 @@ class TestCeleryTasks:
             with pytest.raises(Exception, match="Service error"):
                 delete_document_task.run(document_id)
 
-            mock_delete.assert_called_once_with(document_id)
+            mock_delete.assert_called_once_with(document_id, None)
 
     def test_delete_document_task_missing_error_field(self):
         """Test document deletion task with missing error field."""
@@ -160,7 +160,7 @@ class TestCeleryTasks:
             with pytest.raises(Exception, match="Document deletion failed"):
                 delete_document_task.run(document_id)
 
-            mock_delete.assert_called_once_with(document_id)
+            mock_delete.assert_called_once_with(document_id, None)
 
     def test_process_document_task_logging(self, sample_document_data, caplog):
         """Test that document processing task logs correctly."""
@@ -200,7 +200,7 @@ class TestCeleryTasks:
 
             # Verify the task executed successfully
             assert result == expected_result
-            mock_delete.assert_called_once_with(document_id)
+            mock_delete.assert_called_once_with(document_id, None)
 
     def test_process_document_task_error_logging(self, sample_document_data, caplog):
         """Test that document processing task logs errors correctly."""
