@@ -155,9 +155,6 @@ class DocumentIngestor:
                 f"Processed {len(nodes)} nodes for document {self.document_id}"
             )
 
-            # Store comprehensive metadata in backend database via API
-            self._store_metadata_in_backend(embedded_nodes)
-
             # Send completion notification with chunks data
             if self.progress_manager:
                 chunks_data = self._prepare_chunks_for_completion(embedded_nodes)
@@ -802,26 +799,62 @@ class DocumentIngestor:
         Returns:
             List of chunk data dictionaries
         """
+        file_extension = Path(self.file_path).suffix.lower()
+        file_stats = Path(self.file_path).stat()
+        
         chunks_data = []
-        for node in nodes:
-            chunk_data = {
-                "content": node.text,
-                "chunk_index": node.metadata.get("chunk_index", 0),
-                "document_id": self.document_id,
-                "metadata": {
-                    "chunk_index": node.metadata.get("chunk_index", 0),
-                    "document_id": self.document_id,
+        for i, node in enumerate(nodes):
+            # Use full metadata if available from class-level store (LLMSherpa), otherwise build basic metadata
+            if i in self.full_metadata_store:
+                # Use the full metadata from LLMSherpa parsing
+                full_metadata = self.full_metadata_store[i].copy()
+                # Add additional file-level metadata
+                full_metadata.update(
+                    {
+                        "file_size": file_stats.st_size,
+                        "file_modified": datetime.fromtimestamp(
+                            file_stats.st_mtime
+                        ).isoformat(),
+                        "text_length": len(node.text),
+                        "source": "document_ingestor",
+                        "created_at": datetime.utcnow().isoformat(),
+                        "file_name": Path(self.file_path).name,
+                    }
+                )
+            else:
+                # Build basic metadata for non-LLMSherpa documents
+                full_metadata = {
+                    "file_path": self.file_path,
+                    "file_type": file_extension,
+                    "file_size": file_stats.st_size,
+                    "file_modified": datetime.fromtimestamp(
+                        file_stats.st_mtime
+                    ).isoformat(),
+                    "text_length": len(node.text),
+                    "source": "document_ingestor",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "page_label": getattr(node, "metadata", {}).get("page_label", None),
+                    "file_name": Path(self.file_path).name,
+                    "parser": node.metadata.get("parser", "llama_index"),
+                    "block_type": node.metadata.get("block_type", None),
+                    "block_index": node.metadata.get("block_index", None),
+                    "page_number": node.metadata.get("page_number", None),
                     "content_type": node.metadata.get("content_type", "unknown"),
-                    "block_type": node.metadata.get("block_type", "unknown"),
                     "hierarchical_level": node.metadata.get("hierarchical_level", 0),
                     "importance_score": node.metadata.get("importance_score", 0.5),
-                    "page_number": node.metadata.get("page_number", 1),
                     "llmsherpa_tag": node.metadata.get("llmsherpa_tag", ""),
                     "llmsherpa_block_class": node.metadata.get(
                         "llmsherpa_block_class", ""
                     ),
                     "llmsherpa_level": node.metadata.get("llmsherpa_level", 0),
-                },
+                }
+
+            chunk_data = {
+                "content": node.text,
+                "chunk_index": i,
+                "document_id": self.document_id,
+                "embedding_id": f"{self.document_id}::chunk_{i}",
+                "metadata": full_metadata,
             }
             chunks_data.append(chunk_data)
 
@@ -891,6 +924,7 @@ class DocumentIngestor:
             payload = {
                 "task_id": f"task_{self.document_id}",
                 "document_id": self.document_id,
+                "operation_type": "processing",
                 "status": "completed",
                 "chunks": chunks_data,
                 "error": None,
