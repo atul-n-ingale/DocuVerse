@@ -31,10 +31,10 @@ def process_document(task_id: str, file_path: str, document_id: str) -> Dict[str
 
     # Create progress manager for live updates
     progress_manager = ProgressManager(
-        backend_url=BACKEND_URL, 
-        document_id=document_id, 
+        backend_url=BACKEND_URL,
+        document_id=document_id,
         task_id=task_id,
-        operation_type="processing"
+        operation_type="processing",
     )
 
     try:
