@@ -101,16 +101,20 @@ class LLMSherpaParser:
             block_index = 0
 
             # Extract the JSON structure from LLMSherpa document
-            if hasattr(doc, 'json') and doc.json:
+            if hasattr(doc, "json") and doc.json:
                 # Process each block from the JSON structure
                 for json_block in doc.json:
-                    block_data = self._process_json_block(json_block, file_path, block_index)
+                    block_data = self._process_json_block(
+                        json_block, file_path, block_index
+                    )
                     if block_data:
                         blocks.append(block_data)
                         block_index += 1
             else:
                 # Fallback to section-based parsing if JSON is not available
-                self.logger.warning("JSON structure not available, falling back to section parsing")
+                self.logger.warning(
+                    "JSON structure not available, falling back to section parsing"
+                )
                 for section in doc.sections():
                     section_text = section.to_text()
                     if section_text.strip():
@@ -160,15 +164,17 @@ class LLMSherpaParser:
             self.logger.error(f"Error parsing PDF {file_path}: {str(e)}")
             raise
 
-    def _process_json_block(self, json_block: Dict[str, Any], file_path: Path, block_index: int) -> Dict[str, Any]:
+    def _process_json_block(
+        self, json_block: Dict[str, Any], file_path: Path, block_index: int
+    ) -> Optional[Dict[str, Any]]:
         """
         Process a single JSON block from LLMSherpa and create appropriate chunk structure.
-        
+
         Args:
             json_block: Raw JSON block from LLMSherpa
             file_path: Path to the PDF file
             block_index: Index of the block
-            
+
         Returns:
             Processed block data with hierarchical structure
         """
@@ -180,16 +186,16 @@ class LLMSherpaParser:
         block_idx = json_block.get("block_idx", 0)
         bbox = json_block.get("bbox", None)
         sentences = json_block.get("sentences", [])
-        
+
         # Combine sentences into content
         content = " ".join(sentences) if sentences else ""
-        
+
         if not content.strip():
             return None
-        
+
         # Determine block type based on tag
         block_type = self._map_tag_to_block_type(tag)
-        
+
         # Create comprehensive metadata for MongoDB storage
         full_metadata = {
             "file_path": str(file_path),
@@ -206,7 +212,7 @@ class LLMSherpaParser:
             "content_length": len(content),
             "page_number": page_idx + 1,  # Convert to 1-based page numbering
         }
-        
+
         # Create block data structure
         block_data = {
             "content": content,
@@ -216,22 +222,22 @@ class LLMSherpaParser:
             "bbox": bbox,
             "metadata": full_metadata,
         }
-        
+
         return block_data
 
     def _map_tag_to_block_type(self, tag: str) -> str:
         """
         Map LLMSherpa tags to our block types.
-        
+
         Args:
             tag: LLMSherpa tag (header, para, table, list_item, etc.)
-            
+
         Returns:
             Mapped block type
         """
         tag_mapping = {
             "header": "header",
-            "para": "paragraph", 
+            "para": "paragraph",
             "table": "table",
             "list_item": "list_item",
             "figure": "figure",
@@ -240,7 +246,7 @@ class LLMSherpaParser:
             "abstract": "abstract",
             "title": "title",
         }
-        
+
         return tag_mapping.get(tag, "text")
 
     def _save_debug_json(self, file_path: Path, doc: Any) -> None:
@@ -249,22 +255,22 @@ class LLMSherpaParser:
             # Create debug directory if it doesn't exist
             debug_dir = Path("debug_logs")
             debug_dir.mkdir(exist_ok=True)
-            
+
             # Create filename based on original file
             base_name = file_path.stem
             debug_file = debug_dir / f"{base_name}_llmsherpa_raw.json"
-            
+
             # Extract document structure
-            doc_structure = {
+            doc_structure: Dict[str, Any] = {
                 "document_info": {
                     "file_path": str(file_path),
                     "total_sections": len(list(doc.sections())),
                     "full_text_length": len(doc.to_text()),
-                    "JSON": doc.json
+                    "JSON": doc.json,
                 },
-                "sections": []
+                "sections": [],
             }
-            
+
             # Extract section information
             for i, section in enumerate(doc.sections()):
                 section_info = {
@@ -273,60 +279,66 @@ class LLMSherpaParser:
                     "page_number": getattr(section, "page_number", None),
                     "bbox": getattr(section, "bbox", None),
                     "text_length": len(section.to_text()),
-                    "text_preview": section.to_text()[:200] + "..." if len(section.to_text()) > 200 else section.to_text(),
+                    "text_preview": (
+                        section.to_text()[:200] + "..."
+                        if len(section.to_text()) > 200
+                        else section.to_text()
+                    ),
                 }
                 doc_structure["sections"].append(section_info)
-            
+
             # Save to JSON file
             with open(debug_file, "w", encoding="utf-8") as f:
                 json.dump(doc_structure, f, indent=2, ensure_ascii=False)
-            
+
             self.logger.info(f"Saved raw LLMSherpa structure to: {debug_file}")
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to save debug JSON: {str(e)}")
 
-    def _save_processed_blocks_json(self, file_path: Path, blocks: List[Dict[str, Any]]) -> None:
+    def _save_processed_blocks_json(
+        self, file_path: Path, blocks: List[Dict[str, Any]]
+    ) -> None:
         """Save the processed blocks structure to a JSON file for debugging."""
         try:
             # Create debug directory if it doesn't exist
             debug_dir = Path("debug_logs")
             debug_dir.mkdir(exist_ok=True)
-            
+
             # Create filename based on original file
             base_name = file_path.stem
             debug_file = debug_dir / f"{base_name}_processed_blocks.json"
-            
+
             # Prepare blocks data for JSON serialization
-            blocks_data = {
+            blocks_data: Dict[str, Any] = {
                 "file_info": {
                     "file_path": str(file_path),
                     "total_blocks": len(blocks),
                     "parser": "llmsherpa",
                 },
-                "blocks": []
+                "blocks": [],
             }
-            
+
             # Process each block
             for block in blocks:
                 # Create a copy of the block for JSON serialization
                 block_copy = block.copy()
-                
+
                 # Truncate content for readability
                 if "content" in block_copy and len(block_copy["content"]) > 500:
                     block_copy["content_preview"] = block_copy["content"][:500] + "..."
                     block_copy["content_length"] = len(block_copy["content"])
                     # Don't include full content in debug file to keep it manageable
                     del block_copy["content"]
-                
+
                 blocks_data["blocks"].append(block_copy)
-            
+
             # Save to JSON file
             with open(debug_file, "w", encoding="utf-8") as f:
                 json.dump(blocks_data, f, indent=2, ensure_ascii=False)
-            
+
             self.logger.info(f"Saved processed blocks structure to: {debug_file}")
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to save processed blocks JSON: {str(e)}")
 

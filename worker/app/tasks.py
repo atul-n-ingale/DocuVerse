@@ -53,10 +53,11 @@ def delete_document_task(self: Any, document_id: str) -> Dict[str, Any]:
     """
     Celery task to delete document vectors from Pinecone and report status.
     """
-    logger.info(f"Starting document deletion task for document: {document_id}")
+    task_id = self.request.id
+    logger.info(f"Starting document deletion task: {task_id} for document: {document_id}")
 
     try:
-        result = delete_document_vectors(document_id)
+        result = delete_document_vectors(document_id, task_id)
 
         logger.info(f"Delete document returned result: {result}")
 

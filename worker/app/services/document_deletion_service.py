@@ -1,16 +1,15 @@
 import logging
-from typing import Any, Dict, Optional
-
-import pinecone
-import requests
+from typing import Any, Dict
 
 from app.config import BACKEND_URL, PINECONE_API_KEY, PINECONE_INDEX
+from app.core.lib.llamaindex import CustomPineconeVectorStore
+from app.core.progress_manager import ProgressManager
 
 # Get logger
 logger = logging.getLogger(__name__)
 
 
-def delete_document_vectors(document_id: str) -> Dict[str, Any]:
+def delete_document_vectors(document_id: str, task_id: str) -> Dict[str, Any]:
     """
     Delete all vectors associated with a document from Pinecone.
     Uses hierarchical IDs with document_id prefix for efficient deletion.
@@ -34,113 +33,81 @@ def delete_document_vectors(document_id: str) -> Dict[str, Any]:
 
         logger.info(f"Using Pinecone index: {PINECONE_INDEX}")
 
-        # Initialize Pinecone
-        pc = pinecone.Pinecone(api_key=PINECONE_API_KEY)
-        index = pc.Index(PINECONE_INDEX)
-
-        # Report deletion started
-        report_deletion_status_to_backend(document_id, "deleting", 0)
-
-        # First, try to query for vectors with document_id prefix in their IDs
-        logger.info(f"Querying for vectors with document_id prefix: {document_id}")
-
-        # Use Pinecone query to find all vectors for this document
-        # Try both metadata filtering and ID pattern matching
-        query_response = index.query(
-            vector=[0] * 1536,  # Dummy vector for metadata-only query
-            filter={"document_id": {"$eq": document_id}},
-            include_metadata=True,
-            top_k=10000,  # Large number to get all vectors
+        # Initialize CustomPineconeVectorStore
+        vector_store = CustomPineconeVectorStore(
+            index_name=PINECONE_INDEX,
+            api_key=PINECONE_API_KEY,
+            environment="gcp-starter",
+            namespace="",
+            insert_kwargs={},
+            add_sparse_vector=False,
+            text_key="text",
+            batch_size=100,
+            remove_text_from_metadata=False,
         )
 
-        vector_ids = []
-        if query_response.matches:
-            # Extract vector IDs to delete
-            vector_ids = [match.id for match in query_response.matches]
-            logger.info(
-                f"Found {len(vector_ids)} vectors to delete for document {document_id}"
+        # Initialize ProgressManager for status reporting
+        progress_manager = ProgressManager(
+            backend_url=BACKEND_URL,
+            document_id=document_id,
+            task_id=task_id,
+            operation_type="deletion",
+        )
+
+        # Start deletion stage
+        progress_manager.start_stage("deletion")
+
+        # Get progress callback
+        progress_callback = progress_manager.get_progress_callback()
+
+        # Delete document using CustomPineconeVectorStore
+        deletion_result = vector_store.delete_document(
+            document_id=document_id, progress_callback=progress_callback
+        )
+
+        # Update result with deletion results
+        result.update(deletion_result)
+
+        if result["status"] == "success":
+            # Complete the stage successfully
+            progress_manager.complete_stage("deletion")
+
+            # Send final progress update with completion status
+            logger.info(f"Sending final completion status for document {document_id}")
+            progress_manager.send_final_progress_update(
+                status="completed", 
+                chunks=[]  # Empty chunks for deletion
             )
-
-        if vector_ids:
-            # Delete vectors in batches (Pinecone has limits on batch size)
-            batch_size = 100
-            deleted_count = 0
-
-            for i in range(0, len(vector_ids), batch_size):
-                batch = vector_ids[i : i + batch_size]
-                logger.info(f"Deleting batch {i//batch_size + 1}: {len(batch)} vectors")
-                logger.debug(f"Batch vector IDs: {batch}")
-
-                # Delete the batch
-                index.delete(ids=batch)
-                deleted_count += len(batch)
-
-                # Report progress
-                progress = int((deleted_count / len(vector_ids)) * 100)
-                report_deletion_status_to_backend(document_id, "deleting", progress)
-
-            result["deleted_vectors"] = deleted_count
-            logger.info(
-                f"Successfully deleted {deleted_count} vectors for document {document_id}"
-            )
-
+            logger.info(f"Final completion status sent for document {document_id}")
         else:
-            logger.info(f"No vectors found for document {document_id}")
-
-        # Report successful completion
-        report_deletion_status_to_backend(document_id, "deletion_completed", 100)
+            # Report error status
+            progress_manager.send_final_progress_update(
+                status="failed", error=result.get("error", "Unknown error")
+            )
 
     except Exception as e:
         logger.error(
-            f"Error deleting vectors for document {document_id}: {str(e)}",
+            f"Error deleting vectors for document {document_id}: " f"{str(e)}",
             exc_info=True,
         )
         result["status"] = "error"
         result["error"] = str(e)
 
-        # Report error to backend
+        # Report error to backend using ProgressManager if available
         try:
-            report_deletion_status_to_backend(
-                document_id, "deletion_failed", 0, error=str(e)
-            )
+            if 'progress_manager' in locals():
+                progress_manager.send_final_progress_update(status="failed", error=str(e))
+            else:
+                # Create a new ProgressManager with a fallback task_id
+                fallback_task_id = f"delete_{document_id}"
+                progress_manager = ProgressManager(
+                    backend_url=BACKEND_URL,
+                    document_id=document_id,
+                    task_id=fallback_task_id,
+                    operation_type="deletion",
+                )
+                progress_manager.send_final_progress_update(status="failed", error=str(e))
         except Exception as report_error:
             logger.error(f"Failed to report error status: {str(report_error)}")
 
     return result
-
-
-def report_deletion_status_to_backend(
-    document_id: str,
-    status: str,
-    progress: int,
-    error: Optional[str] = None,
-) -> None:
-    """Report deletion status to backend via REST API"""
-    try:
-        payload: Dict[str, Any] = {
-            "task_id": f"delete_{document_id}",
-            "document_id": document_id,
-            "status": status,
-            "chunks": [],  # Empty list for deletion operations
-            "error": error,
-        }
-
-        logger.info(f"Reporting deletion status to backend: {status} for {document_id}")
-
-        response = requests.post(
-            f"{BACKEND_URL}/worker/status",
-            json=payload,
-            timeout=10,
-        )
-
-        if response.status_code == 200:
-            logger.info(f"Successfully reported deletion status: {status}")
-        else:
-            logger.error(
-                f"Failed to report deletion status. "
-                f"Status code: {response.status_code}, "
-                f"Response: {response.text}"
-            )
-
-    except Exception as e:
-        logger.error(f"Error reporting deletion status to backend: {str(e)}")

@@ -17,15 +17,18 @@ from llama_index.readers.file import CSVReader, ImageReader
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 
 from app.config import BACKEND_URL, OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX
-from app.services.llmsherpa_parser import LLMSherpaParser
-from app.core.lib.llamaindex import CustomHierarchicalNodeParser, CustomPineconeVectorStore
+from app.core.lib.llamaindex import (
+    CustomHierarchicalNodeParser,
+    CustomPineconeVectorStore,
+)
 from app.core.progress_manager import ProgressManager
+from app.services.llmsherpa_parser import LLMSherpaParser
 
 
 class DocumentIngestor:
     """
     Document ingestion service using hybrid approach (LLMSherpa + LlamaIndex).
-    
+
     This class handles document ingestion with the following features:
     - LLMSherpa for structured parsing of PDF, HTML, DOCX, PPT, Markdown
     - LlamaIndex for other formats (images, CSV)
@@ -33,44 +36,56 @@ class DocumentIngestor:
     - Metadata filtering for Pinecone compatibility
     """
 
-    def __init__(self, document_id: str, file_path: str, progress_manager: Optional[ProgressManager] = None):
+    def __init__(
+        self,
+        document_id: str,
+        file_path: str,
+        progress_manager: Optional[ProgressManager] = None,
+    ):
         """Initialize DocumentIngestor with document ID and file path."""
         self.document_id = document_id
         self.file_path = file_path
         self.logger = logging.getLogger(__name__)
         self.progress_manager = progress_manager
-        
+
         # Store full metadata separately for backend storage
         self.full_metadata_store: Dict[int, Dict[str, Any]] = {}
-        
+
         # Initialize LLMSherpa parser
         self.llmsherpa_parser = LLMSherpaParser()
-        
+
         # Get progress callback if available
         progress_callback = None
         if self.progress_manager:
             progress_callback = self.progress_manager.get_progress_callback()
-        
+
         # Initialize custom LlamaIndex components
         self.chunker = CustomHierarchicalNodeParser.from_defaults(
             chunk_sizes=[4096, 2048, 1024],
             chunk_overlap=100,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
         )
-        
+
         # Initialize custom Pinecone vector store
         self.vector_store = CustomPineconeVectorStore(
             index_name=PINECONE_INDEX,
             api_key=PINECONE_API_KEY,
-            progress_callback=progress_callback
+            environment="gcp-starter",
+            namespace="",
+            insert_kwargs={},
+            add_sparse_vector=False,
+            text_key="text",
+            batch_size=100,
+            remove_text_from_metadata=False,
+            progress_callback=progress_callback,
         )
-        
+
         # Initialize embedding model
         self.embed_model = OpenAIEmbedding(
             model="text-embedding-3-small",
             api_key=OPENAI_API_KEY,
         )
-        
+
         # Initialize ingestion pipeline
         self.pipeline = IngestionPipeline(
             transformations=[
@@ -79,7 +94,7 @@ class DocumentIngestor:
             ],
             vector_store=self.vector_store,
         )
-        
+
         # File readers for different formats
         self.llama_readers = {
             ".png": ImageReader(),
@@ -147,36 +162,45 @@ class DocumentIngestor:
             if self.progress_manager:
                 chunks_data = self._prepare_chunks_for_completion(embedded_nodes)
                 # Use the merged report_status_to_backend method
-                self.progress_manager.send_final_progress_update("completed", chunks=chunks_data)
+                self.progress_manager.send_final_progress_update(
+                    "completed", chunks=chunks_data
+                )
 
             return len(nodes)
 
         except Exception as e:
             self.logger.error(f"Error during ingestion: {str(e)}", exc_info=True)
             if self.progress_manager:
-                self.progress_manager.report_status_to_backend("failed", error=str(e))
+                self.progress_manager.send_final_progress_update("failed", error=str(e))
             raise
 
     def _filter_metadata_for_pinecone(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
         Filter metadata to only include Pinecone-compatible fields.
         Pinecone only accepts string, number, boolean, or list of strings.
-        
+
         Args:
             metadata: Original metadata dictionary
-            
+
         Returns:
             Filtered metadata compatible with Pinecone
         """
         filtered_metadata: Dict[str, Any] = {}
-        
+
         # Essential metadata for search and retrieval
         essential_keys = [
-            "document_id", "content_type", "block_type", "block_index", 
-            "page_number", "hierarchical_level", "importance_score",
-            "llmsherpa_tag", "llmsherpa_block_class", "llmsherpa_level"
+            "document_id",
+            "content_type",
+            "block_type",
+            "block_index",
+            "page_number",
+            "hierarchical_level",
+            "importance_score",
+            "llmsherpa_tag",
+            "llmsherpa_block_class",
+            "llmsherpa_level",
         ]
-        
+
         for key in essential_keys:
             if key in metadata:
                 value = metadata[key]
@@ -184,16 +208,22 @@ class DocumentIngestor:
                     filtered_metadata[key] = value
                 elif value is not None:
                     filtered_metadata[key] = str(value)
-        
+
         # Add any other compatible metadata
         for key, value in metadata.items():
             if key in essential_keys:
                 continue  # Already processed
-                
+
             # Skip complex objects that Pinecone doesn't support
-            if key in ["bbox", "table_data", "image_info", "llmsherpa_bbox", "llmsherpa_sentences"]:
+            if key in [
+                "bbox",
+                "table_data",
+                "image_info",
+                "llmsherpa_bbox",
+                "llmsherpa_sentences",
+            ]:
                 continue
-                
+
             # Convert values to Pinecone-compatible types
             if isinstance(value, (str, int, float, bool)):
                 filtered_metadata[key] = value
@@ -204,13 +234,13 @@ class DocumentIngestor:
             elif value is not None:
                 # Convert other types to string
                 filtered_metadata[key] = str(value)
-                
+
         return filtered_metadata
 
     def _store_full_metadata(self, documents: List[Document]) -> None:
         """
         Store full metadata from hierarchical documents for backend storage.
-        
+
         Args:
             documents: List of LlamaIndex Document objects with full metadata
         """
@@ -225,33 +255,39 @@ class DocumentIngestor:
                 "file_name": Path(self.file_path).name,
                 **doc.metadata,  # Include all hierarchical metadata
             }
-            
+
             # Store in class-level metadata store for backend storage
             self.full_metadata_store[i] = full_metadata
 
     def _ingest_with_llmsherpa(self) -> List[Any]:
         """
         Ingest document using LLMSherpa parser with hierarchical chunking.
-        
+
         Returns:
             List of processed nodes with embeddings
         """
         try:
             # Parse document content using LLMSherpa
             if self.progress_manager:
-                self.progress_manager.update_stage_progress("Parsing document with LLMSherpa", 0, 1)
-            
+                self.progress_manager.update_stage_progress(
+                    "Parsing document with LLMSherpa", 0, 1
+                )
+
             blocks = self.llmsherpa_parser.parse_document(self.file_path)
-            
+
             if self.progress_manager:
-                self.progress_manager.update_stage_progress(f"Parsed {len(blocks)} blocks", 1, 1)
-            
+                self.progress_manager.update_stage_progress(
+                    f"Parsed {len(blocks)} blocks", 1, 1
+                )
+
             # Convert blocks to LlamaIndex documents with hierarchical structure
             if self.progress_manager:
                 self.progress_manager.start_stage("chunking")
-            
+
             # Create documents with filtered metadata to avoid chunking issues
-            documents = self._create_hierarchical_chunks_with_filtered_metadata(blocks, self.document_id)
+            documents = self._create_hierarchical_chunks_with_filtered_metadata(
+                blocks, self.document_id
+            )
 
             if self.progress_manager:
                 self.progress_manager.complete_stage("chunking")
@@ -262,18 +298,20 @@ class DocumentIngestor:
             # Chunk the documents
             if self.progress_manager:
                 self.progress_manager.start_stage("embedding")
-            
+
             nodes = self.chunker.get_nodes_from_documents(documents)
-            
+
             if self.progress_manager:
                 self.progress_manager.complete_stage("embedding")
-            
+
             return nodes
 
         except Exception as e:
             self.logger.error(f"Error in LLMSherpa ingestion: {str(e)}")
             if self.progress_manager:
-                self.progress_manager.send_final_progress_update("failed", error=f"LLMSherpa ingestion failed: {str(e)}")
+                self.progress_manager.send_final_progress_update(
+                    "failed", error=f"LLMSherpa ingestion failed: {str(e)}"
+                )
             raise
 
     def _create_hierarchical_chunks_with_filtered_metadata(
@@ -281,57 +319,57 @@ class DocumentIngestor:
     ) -> List[Document]:
         """
         Create hierarchical chunks with filtered metadata to avoid chunking issues.
-        
+
         Args:
             blocks: List of parsed blocks from LLMSherpa
             document_id: ID of the document being processed
-            
+
         Returns:
             List of LlamaIndex Document objects with filtered metadata
         """
         # First create documents with full metadata for backend storage
         full_documents = self._create_hierarchical_chunks(blocks, document_id)
-        
+
         # Store full metadata for backend
         self._store_full_metadata(full_documents)
-        
+
         # Create documents with filtered metadata for chunking
         filtered_documents = []
         for i, doc in enumerate(full_documents):
             # Filter metadata to avoid chunking issues
             filtered_metadata = self._filter_metadata_for_chunking(doc.metadata)
-            
+
             # Debug: Log metadata sizes
             original_size = len(str(doc.metadata))
             filtered_size = len(str(filtered_metadata))
-            self.logger.info(f"Document {i}: Original metadata size: {original_size}, Filtered: {filtered_size}")
-            
+            self.logger.info(
+                f"Document {i}: Original metadata size: {original_size}, Filtered: {filtered_size}"
+            )
+
             # Create new document with filtered metadata
             filtered_doc = Document(
                 text=doc.text,
                 metadata=filtered_metadata,
-                relationships=doc.relationships
+                relationships=doc.relationships,
             )
             filtered_documents.append(filtered_doc)
-        
+
         return filtered_documents
 
     def _filter_metadata_for_chunking(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
         Filter metadata to absolute minimum for chunking to avoid size issues.
-        
+
         Args:
             metadata: Original metadata dictionary
-            
+
         Returns:
             Minimal metadata for chunking (only essential fields)
         """
         # Keep only the absolute minimum metadata for chunking
         # This ensures metadata is always smaller than chunk sizes
-        minimal_keys = [
-            "document_id", "content_type", "hierarchical_level"
-        ]
-        
+        minimal_keys = ["document_id", "content_type", "hierarchical_level"]
+
         filtered_metadata = {}
         for key in minimal_keys:
             if key in metadata:
@@ -339,21 +377,25 @@ class DocumentIngestor:
                 # Convert all values to strings to minimize size
                 if value is not None:
                     filtered_metadata[key] = str(value)[:50]  # Limit string length
-        
+
         # Add a simple identifier
-        filtered_metadata["chunk_id"] = f"chunk_{hash(str(metadata.get('document_id', '')))}"
-        
+        filtered_metadata["chunk_id"] = (
+            f"chunk_{hash(str(metadata.get('document_id', '')))}"
+        )
+
         # Safety check: ensure metadata is smaller than smallest chunk size (1024)
         metadata_str = str(filtered_metadata)
         if len(metadata_str) > 800:  # Leave some buffer
-            self.logger.warning(f"Metadata still too large ({len(metadata_str)} chars), truncating...")
+            self.logger.warning(
+                f"Metadata still too large ({len(metadata_str)} chars), truncating..."
+            )
             # Keep only the most essential fields
             filtered_metadata = {
                 "document_id": str(metadata.get("document_id", ""))[:20],
                 "content_type": str(metadata.get("content_type", ""))[:20],
-                "chunk_id": f"chunk_{hash(str(metadata.get('document_id', '')))}"
+                "chunk_id": f"chunk_{hash(str(metadata.get('document_id', '')))}",
             }
-        
+
         return filtered_metadata
 
     def _create_hierarchical_chunks(
@@ -361,27 +403,27 @@ class DocumentIngestor:
     ) -> List[Document]:
         """
         Create hierarchical chunks based on LLMSherpa structure and LlamaIndex best practices.
-        
+
         Args:
             blocks: Parsed content blocks from LLMSherpa
             document_id: Document identifier
-            
+
         Returns:
             List of LlamaIndex Document objects with proper hierarchical structure
         """
-        documents = []
-        
+        documents: List[Document] = []
+
         # Group blocks by content type for hierarchical processing
         content_groups = self._group_blocks_by_type(blocks)
-        
+
         # Create hierarchical structure based on LLMSherpa levels
         hierarchical_docs = self._create_llmsherpa_hierarchy(
             content_groups, document_id
         )
-        
+
         # Set up proper relationships for modern LlamaIndex compatibility
         self._setup_document_relationships(hierarchical_docs, document_id)
-        
+
         self.logger.info(
             f"Created {len(hierarchical_docs)} hierarchical documents from {len(blocks)} blocks"
         )
@@ -393,25 +435,25 @@ class DocumentIngestor:
         """
         Set up proper relationships for modern LlamaIndex compatibility.
         Uses relationships field instead of deprecated ref_doc_id.
-        
+
         Args:
             documents: List of Document objects
             document_id: Document identifier
         """
         from llama_index.core.schema import NodeRelationship, RelatedNodeInfo
-        
+
         # Create a source document node info
         source_node_info = RelatedNodeInfo(
             node_id=document_id,
             node_type="document",
             metadata={"document_id": document_id},
         )
-        
+
         # Set up relationships for each document
         for doc in documents:
             # Set the source relationship (modern approach)
             doc.relationships[NodeRelationship.SOURCE] = source_node_info
-            
+
             # Also keep document_id in metadata for backward compatibility
             doc.metadata["document_id"] = document_id
 
@@ -420,74 +462,76 @@ class DocumentIngestor:
     ) -> List[Document]:
         """
         Create hierarchical structure based on LLMSherpa block types and levels.
-        
+
         Args:
             content_groups: Blocks grouped by content type
             document_id: Document identifier
-            
+
         Returns:
             List of Document objects with hierarchical relationships
         """
         documents = []
-        
+
         # Process headers first (highest level - 0)
         if content_groups["headers"]:
             header_docs = self._process_headers_hierarchical(
                 content_groups["headers"], document_id
             )
             documents.extend(header_docs)
-        
+
         # Process paragraphs (level 1)
         if content_groups["paragraphs"]:
             paragraph_docs = self._process_paragraphs_hierarchical(
                 content_groups["paragraphs"], document_id
             )
             documents.extend(paragraph_docs)
-        
+
         # Process tables (level 1)
         if content_groups["tables"]:
             table_docs = self._process_tables_hierarchical(
                 content_groups["tables"], document_id
             )
             documents.extend(table_docs)
-        
+
         # Process lists (level 2)
         if content_groups["lists"]:
             list_docs = self._process_lists_hierarchical(
                 content_groups["lists"], document_id
             )
             documents.extend(list_docs)
-        
+
         # Process other content (level 3)
         if content_groups["other"]:
             other_docs = self._process_other_blocks_hierarchical(
                 content_groups["other"], document_id
             )
             documents.extend(other_docs)
-        
+
         return documents
 
-    def _group_blocks_by_type(self, blocks: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    def _group_blocks_by_type(
+        self, blocks: List[Dict[str, Any]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Group blocks by their content type for specialized processing.
-        
+
         Args:
             blocks: Parsed content blocks
-            
+
         Returns:
             Dictionary of blocks grouped by content type
         """
-        groups = {
+        groups: Dict[str, List[Dict[str, Any]]] = {
             "headers": [],
             "paragraphs": [],
             "tables": [],
             "lists": [],
-            "other": []
+            "other": [],
         }
-        
+
         for block in blocks:
             block_type = block.get("block_type", "other")
-            
+
             if block_type == "header":
                 groups["headers"].append(block)
             elif block_type == "paragraph":
@@ -498,12 +542,12 @@ class DocumentIngestor:
                 groups["lists"].append(block)
             else:
                 groups["other"].append(block)
-        
+
         # Log grouping statistics
         for content_type, type_blocks in groups.items():
             if type_blocks:
                 self.logger.info(f"Grouped {len(type_blocks)} {content_type}")
-        
+
         return groups
 
     def _process_headers_hierarchical(
@@ -511,7 +555,7 @@ class DocumentIngestor:
     ) -> List[Document]:
         """Process header blocks with proper hierarchical level (0)."""
         documents = []
-        
+
         for i, block in enumerate(blocks):
             # Create document with header-specific metadata and level 0
             doc = Document(
@@ -524,16 +568,24 @@ class DocumentIngestor:
                     "page_number": block.get("page_number", 1),
                     "hierarchical_level": 0,  # Highest level
                     "importance_score": 0.9,
-                    "llmsherpa_tag": block.get("metadata", {}).get("llmsherpa_tag", "header"),
-                    "llmsherpa_block_class": block.get("metadata", {}).get("llmsherpa_block_class", ""),
-                    "llmsherpa_level": block.get("metadata", {}).get("llmsherpa_level", 0),
+                    "llmsherpa_tag": block.get("metadata", {}).get(
+                        "llmsherpa_tag", "header"
+                    ),
+                    "llmsherpa_block_class": block.get("metadata", {}).get(
+                        "llmsherpa_block_class", ""
+                    ),
+                    "llmsherpa_level": block.get("metadata", {}).get(
+                        "llmsherpa_level", 0
+                    ),
                     "llmsherpa_bbox": block.get("metadata", {}).get("llmsherpa_bbox"),
-                    "llmsherpa_sentences": block.get("metadata", {}).get("llmsherpa_sentences", []),
+                    "llmsherpa_sentences": block.get("metadata", {}).get(
+                        "llmsherpa_sentences", []
+                    ),
                     "ref_doc_id": document_id,  # For Pinecone integration
-                }
+                },
             )
             documents.append(doc)
-        
+
         return documents
 
     def _process_paragraphs_hierarchical(
@@ -541,19 +593,19 @@ class DocumentIngestor:
     ) -> List[Document]:
         """Process paragraph blocks with hierarchical level (1)."""
         documents = []
-        
+
         # Group paragraphs by page for better organization
-        page_groups = {}
+        page_groups: Dict[int, List[Dict[str, Any]]] = {}
         for block in blocks:
             page = block.get("page_number", 1)
             if page not in page_groups:
                 page_groups[page] = []
             page_groups[page].append(block)
-        
+
         for page, page_blocks in page_groups.items():
             # Sort by block index for proper order
             page_blocks.sort(key=lambda x: x.get("block_index", 0))
-            
+
             for i, block in enumerate(page_blocks):
                 doc = Document(
                     text=block["content"],
@@ -565,16 +617,26 @@ class DocumentIngestor:
                         "page_number": page,
                         "hierarchical_level": 1,  # Medium level
                         "importance_score": 0.7,
-                        "llmsherpa_tag": block.get("metadata", {}).get("llmsherpa_tag", "para"),
-                        "llmsherpa_block_class": block.get("metadata", {}).get("llmsherpa_block_class", ""),
-                        "llmsherpa_level": block.get("metadata", {}).get("llmsherpa_level", 1),
-                        "llmsherpa_bbox": block.get("metadata", {}).get("llmsherpa_bbox"),
-                        "llmsherpa_sentences": block.get("metadata", {}).get("llmsherpa_sentences", []),
+                        "llmsherpa_tag": block.get("metadata", {}).get(
+                            "llmsherpa_tag", "para"
+                        ),
+                        "llmsherpa_block_class": block.get("metadata", {}).get(
+                            "llmsherpa_block_class", ""
+                        ),
+                        "llmsherpa_level": block.get("metadata", {}).get(
+                            "llmsherpa_level", 1
+                        ),
+                        "llmsherpa_bbox": block.get("metadata", {}).get(
+                            "llmsherpa_bbox"
+                        ),
+                        "llmsherpa_sentences": block.get("metadata", {}).get(
+                            "llmsherpa_sentences", []
+                        ),
                         "ref_doc_id": document_id,
-                    }
+                    },
                 )
                 documents.append(doc)
-        
+
         return documents
 
     def _process_tables_hierarchical(
@@ -582,7 +644,7 @@ class DocumentIngestor:
     ) -> List[Document]:
         """Process table blocks with hierarchical level (1)."""
         documents = []
-        
+
         for i, block in enumerate(blocks):
             doc = Document(
                 text=block["content"],
@@ -594,16 +656,24 @@ class DocumentIngestor:
                     "page_number": block.get("page_number", 1),
                     "hierarchical_level": 1,  # Medium level
                     "importance_score": 0.8,
-                    "llmsherpa_tag": block.get("metadata", {}).get("llmsherpa_tag", "table"),
-                    "llmsherpa_block_class": block.get("metadata", {}).get("llmsherpa_block_class", ""),
-                    "llmsherpa_level": block.get("metadata", {}).get("llmsherpa_level", 1),
+                    "llmsherpa_tag": block.get("metadata", {}).get(
+                        "llmsherpa_tag", "table"
+                    ),
+                    "llmsherpa_block_class": block.get("metadata", {}).get(
+                        "llmsherpa_block_class", ""
+                    ),
+                    "llmsherpa_level": block.get("metadata", {}).get(
+                        "llmsherpa_level", 1
+                    ),
                     "llmsherpa_bbox": block.get("metadata", {}).get("llmsherpa_bbox"),
-                    "llmsherpa_sentences": block.get("metadata", {}).get("llmsherpa_sentences", []),
+                    "llmsherpa_sentences": block.get("metadata", {}).get(
+                        "llmsherpa_sentences", []
+                    ),
                     "ref_doc_id": document_id,
-                }
+                },
             )
             documents.append(doc)
-        
+
         return documents
 
     def _process_lists_hierarchical(
@@ -611,19 +681,19 @@ class DocumentIngestor:
     ) -> List[Document]:
         """Process list item blocks with hierarchical level (2)."""
         documents = []
-        
+
         # Group list items by page
-        page_groups = {}
+        page_groups: Dict[int, List[Dict[str, Any]]] = {}
         for block in blocks:
             page = block.get("page_number", 1)
             if page not in page_groups:
                 page_groups[page] = []
             page_groups[page].append(block)
-        
+
         for page, page_blocks in page_groups.items():
             # Sort by block index for proper order
             page_blocks.sort(key=lambda x: x.get("block_index", 0))
-            
+
             for i, block in enumerate(page_blocks):
                 doc = Document(
                     text=block["content"],
@@ -635,16 +705,26 @@ class DocumentIngestor:
                         "page_number": page,
                         "hierarchical_level": 2,  # Lower level
                         "importance_score": 0.6,
-                        "llmsherpa_tag": block.get("metadata", {}).get("llmsherpa_tag", "list_item"),
-                        "llmsherpa_block_class": block.get("metadata", {}).get("llmsherpa_block_class", ""),
-                        "llmsherpa_level": block.get("metadata", {}).get("llmsherpa_level", 2),
-                        "llmsherpa_bbox": block.get("metadata", {}).get("llmsherpa_bbox"),
-                        "llmsherpa_sentences": block.get("metadata", {}).get("llmsherpa_sentences", []),
+                        "llmsherpa_tag": block.get("metadata", {}).get(
+                            "llmsherpa_tag", "list_item"
+                        ),
+                        "llmsherpa_block_class": block.get("metadata", {}).get(
+                            "llmsherpa_block_class", ""
+                        ),
+                        "llmsherpa_level": block.get("metadata", {}).get(
+                            "llmsherpa_level", 2
+                        ),
+                        "llmsherpa_bbox": block.get("metadata", {}).get(
+                            "llmsherpa_bbox"
+                        ),
+                        "llmsherpa_sentences": block.get("metadata", {}).get(
+                            "llmsherpa_sentences", []
+                        ),
                         "ref_doc_id": document_id,
-                    }
+                    },
                 )
                 documents.append(doc)
-        
+
         return documents
 
     def _process_other_blocks_hierarchical(
@@ -652,7 +732,7 @@ class DocumentIngestor:
     ) -> List[Document]:
         """Process other block types with hierarchical level (3)."""
         documents = []
-        
+
         for i, block in enumerate(blocks):
             doc = Document(
                 text=block["content"],
@@ -664,16 +744,24 @@ class DocumentIngestor:
                     "page_number": block.get("page_number", 1),
                     "hierarchical_level": 3,  # Lowest level
                     "importance_score": 0.5,
-                    "llmsherpa_tag": block.get("metadata", {}).get("llmsherpa_tag", "unknown"),
-                    "llmsherpa_block_class": block.get("metadata", {}).get("llmsherpa_block_class", ""),
-                    "llmsherpa_level": block.get("metadata", {}).get("llmsherpa_level", 3),
+                    "llmsherpa_tag": block.get("metadata", {}).get(
+                        "llmsherpa_tag", "unknown"
+                    ),
+                    "llmsherpa_block_class": block.get("metadata", {}).get(
+                        "llmsherpa_block_class", ""
+                    ),
+                    "llmsherpa_level": block.get("metadata", {}).get(
+                        "llmsherpa_level", 3
+                    ),
                     "llmsherpa_bbox": block.get("metadata", {}).get("llmsherpa_bbox"),
-                    "llmsherpa_sentences": block.get("metadata", {}).get("llmsherpa_sentences", []),
+                    "llmsherpa_sentences": block.get("metadata", {}).get(
+                        "llmsherpa_sentences", []
+                    ),
                     "ref_doc_id": document_id,
-                }
+                },
             )
             documents.append(doc)
-        
+
         return documents
 
     def _ingest_with_llama_index(self) -> List[Any]:
@@ -702,13 +790,15 @@ class DocumentIngestor:
 
         return cast(Union[ImageReader, CSVReader], self.llama_readers[file_extension])
 
-    def _prepare_chunks_for_completion(self, nodes: Sequence[Any]) -> List[Dict[str, Any]]:
+    def _prepare_chunks_for_completion(
+        self, nodes: Sequence[Any]
+    ) -> List[Dict[str, Any]]:
         """
         Prepare chunks data for completion notification.
-        
+
         Args:
             nodes: List of processed nodes
-            
+
         Returns:
             List of chunk data dictionaries
         """
@@ -727,12 +817,14 @@ class DocumentIngestor:
                     "importance_score": node.metadata.get("importance_score", 0.5),
                     "page_number": node.metadata.get("page_number", 1),
                     "llmsherpa_tag": node.metadata.get("llmsherpa_tag", ""),
-                    "llmsherpa_block_class": node.metadata.get("llmsherpa_block_class", ""),
+                    "llmsherpa_block_class": node.metadata.get(
+                        "llmsherpa_block_class", ""
+                    ),
                     "llmsherpa_level": node.metadata.get("llmsherpa_level", 0),
-                }
+                },
             }
             chunks_data.append(chunk_data)
-        
+
         return chunks_data
 
     def _store_metadata_in_backend(self, nodes: Sequence[Any]) -> None:
@@ -748,16 +840,18 @@ class DocumentIngestor:
                 # Use the full metadata from LLMSherpa parsing
                 full_metadata = self.full_metadata_store[i].copy()
                 # Add additional file-level metadata
-                full_metadata.update({
-                    "file_size": file_stats.st_size,
-                    "file_modified": datetime.fromtimestamp(
-                        file_stats.st_mtime
-                    ).isoformat(),
-                    "text_length": len(node.text),
-                    "source": "document_ingestor",
-                    "created_at": datetime.utcnow().isoformat(),
-                    "file_name": Path(self.file_path).name,
-                })
+                full_metadata.update(
+                    {
+                        "file_size": file_stats.st_size,
+                        "file_modified": datetime.fromtimestamp(
+                            file_stats.st_mtime
+                        ).isoformat(),
+                        "text_length": len(node.text),
+                        "source": "document_ingestor",
+                        "created_at": datetime.utcnow().isoformat(),
+                        "file_name": Path(self.file_path).name,
+                    }
+                )
             else:
                 # Build basic metadata for non-LLMSherpa documents
                 full_metadata = {

@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.config import BACKEND_URL
 from app.services.document_processor_service import (
     process_document,
-    report_status_to_backend,
     save_workflow_state,
     upsert_pinecone,
 )
@@ -50,111 +50,144 @@ class TestDocumentProcessorService:
             mock_mongo_class.assert_called_once()
             mock_mongodb_client.get_default_database.assert_called_once()
 
-    def test_report_status_to_backend_success(self, mock_requests_post):
-        """Test successful status reporting to backend."""
-        with patch(
-            "app.services.document_processor_service.requests.post"
-        ) as mock_post:
-            mock_post.return_value = mock_requests_post
+    def test_process_document_success_with_progress_manager(self, mock_requests_post):
+        """Test successful document processing with ProgressManager."""
+        with (
+            patch(
+                "app.services.document_processor_service.ProgressManager"
+            ) as mock_pm_class,
+            patch(
+                "app.services.document_ingestor.DocumentIngestor"
+            ) as mock_ingestor_class,
+        ):
+            # Mock ProgressManager
+            mock_progress_manager = MagicMock()
+            mock_pm_class.return_value = mock_progress_manager
 
-            # Should not raise an exception
-            report_status_to_backend("task-123", "doc-456", "completed", 5)
+            # Mock DocumentIngestor
+            mock_ingestor = MagicMock()
+            mock_ingestor_class.return_value = mock_ingestor
+            mock_ingestor.ingest.return_value = 5  # 5 chunks
 
-            mock_post.assert_called_once()
-            call_args = mock_post.call_args
-            assert call_args[1]["json"]["task_id"] == "task-123"
-            assert call_args[1]["json"]["document_id"] == "doc-456"
-            assert call_args[1]["json"]["status"] == "completed"
-            assert call_args[1]["json"]["chunks"] == 5
+            # Test the function
+            result = process_document("task-123", "/path/to/file.pdf", "doc-456")
 
-    def test_report_status_to_backend_with_error(self, mock_requests_post):
-        """Test status reporting with error message."""
-        with patch(
-            "app.services.document_processor_service.requests.post"
-        ) as mock_post:
-            mock_post.return_value = mock_requests_post
+            # Verify result
+            assert result["status"] == "success"
+            assert result["document_id"] == "doc-456"
+            assert result["chunks"] == 5
 
-            report_status_to_backend(
-                "task-123", "doc-456", "failed", [], error="Test error"
+            # Verify ProgressManager was used
+            mock_pm_class.assert_called_once_with(
+                backend_url=BACKEND_URL, document_id="doc-456", task_id="task-123"
+            )
+            mock_progress_manager.report_status_to_backend.assert_called_once_with(
+                "processing"
             )
 
-            mock_post.assert_called_once()
-            call_args = mock_post.call_args
-            assert call_args[1]["json"]["error"] == "Test error"
+            # Verify DocumentIngestor was used
+            mock_ingestor_class.assert_called_once_with(
+                "doc-456", "/path/to/file.pdf", mock_progress_manager
+            )
+            mock_ingestor.ingest.assert_called_once()
 
-    @patch("app.services.document_processor_service.extract_text")
-    @patch("app.services.document_processor_service.upsert_pinecone")
-    @patch("app.services.document_processor_service.save_workflow_state")
-    @patch("app.services.document_processor_service.report_status_to_backend")
+    def test_process_document_failure_with_progress_manager(self, mock_requests_post):
+        """Test document processing failure with ProgressManager."""
+        with (
+            patch(
+                "app.services.document_processor_service.ProgressManager"
+            ) as mock_pm_class,
+            patch(
+                "app.services.document_ingestor.DocumentIngestor"
+            ) as mock_ingestor_class,
+        ):
+            # Mock ProgressManager
+            mock_progress_manager = MagicMock()
+            mock_pm_class.return_value = mock_progress_manager
+
+            # Mock DocumentIngestor to raise an exception
+            mock_ingestor = MagicMock()
+            mock_ingestor_class.return_value = mock_ingestor
+            mock_ingestor.ingest.side_effect = Exception("Processing failed")
+
+            # Test the function
+            result = process_document("task-123", "/path/to/file.pdf", "doc-456")
+
+            # Verify result
+            assert result["status"] == "error"
+            assert result["document_id"] == "doc-456"
+            assert "Processing failed" in result["error"]
+
+            # Verify ProgressManager was used
+            mock_pm_class.assert_called_once_with(
+                backend_url=BACKEND_URL, document_id="doc-456", task_id="task-123"
+            )
+            mock_progress_manager.report_status_to_backend.assert_called_once_with(
+                "processing"
+            )
+
+    @patch("app.services.document_processor_service.ProgressManager")
     def test_process_document_success(
         self,
-        mock_report_status,
-        mock_save_state,
-        mock_upsert,
-        mock_extract_text,
+        mock_progress_manager_class,
         mock_openai_client,
         mock_sentence_splitter,
         sample_document_data,
     ):
         """Test successful document processing."""
         # Setup mocks
-        mock_extract_text.return_value = "Sample document content"
+        mock_progress_manager = MagicMock()
+        mock_progress_manager_class.return_value = mock_progress_manager
 
-        with (
-            patch(
-                "app.services.document_processor_service.OpenAI"
-            ) as mock_openai_class,
-            patch(
-                "app.services.document_processor_service.SentenceSplitter"
-            ) as mock_splitter_class,
-        ):
+        # Mock DocumentIngestor
+        with patch(
+            "app.services.document_ingestor.DocumentIngestor"
+        ) as mock_ingestor_class:
+            mock_ingestor = MagicMock()
+            mock_ingestor_class.return_value = mock_ingestor
+            mock_ingestor.ingest.return_value = 5  # 5 chunks
 
-            mock_openai_class.return_value = mock_openai_client
-            mock_splitter_class.return_value = mock_sentence_splitter
+            # Test the function
+            result = process_document("task-123", "/path/to/file.pdf", "doc-456")
 
-            # Call the function
-            result = process_document(
-                sample_document_data["task_id"],
-                sample_document_data["file_path"],
-                sample_document_data["document_id"],
+            # Verify result
+            assert result["status"] == "success"
+            assert result["document_id"] == "doc-456"
+            assert result["chunks"] == 5
+
+            # Verify ProgressManager was used
+            mock_progress_manager_class.assert_called_once()
+            mock_progress_manager.report_status_to_backend.assert_called_once_with(
+                "processing"
             )
 
-            # Assertions
-            assert result["status"] == "success"
-            assert result["document_id"] == sample_document_data["document_id"]
-            assert "chunks" in result
-
-            # Verify all steps were called
-            mock_extract_text.assert_called_once()
-            mock_upsert.assert_called_once()
-            mock_save_state.assert_called()
-            mock_report_status.assert_called()
-
-    @patch("app.services.document_processor_service.extract_text")
-    @patch("app.services.document_processor_service.report_status_to_backend")
+    @patch("app.services.document_processor_service.ProgressManager")
     def test_process_document_failure(
-        self, mock_report_status, mock_extract_text, sample_document_data
+        self, mock_progress_manager_class, sample_document_data
     ):
-        """Test document processing with failure."""
-        # Setup mock to raise exception
-        mock_extract_text.side_effect = Exception("Test extraction error")
+        """Test document processing failure."""
+        # Setup mocks
+        mock_progress_manager = MagicMock()
+        mock_progress_manager_class.return_value = mock_progress_manager
 
-        # Call the function
-        result = process_document(
-            sample_document_data["task_id"],
-            sample_document_data["file_path"],
-            sample_document_data["document_id"],
-        )
+        # Mock DocumentIngestor to raise an exception
+        with patch(
+            "app.services.document_ingestor.DocumentIngestor"
+        ) as mock_ingestor_class:
+            mock_ingestor = MagicMock()
+            mock_ingestor_class.return_value = mock_ingestor
+            mock_ingestor.ingest.side_effect = Exception("Processing failed")
 
-        # Assertions
-        assert result["status"] == "error"
-        assert "Test extraction error" in result["error"]
+            # Test the function
+            result = process_document("task-123", "/path/to/file.pdf", "doc-456")
 
-        # Verify error reporting was called
-        mock_report_status.assert_called_with(
-            sample_document_data["task_id"],
-            sample_document_data["document_id"],
-            "failed",
-            [],
-            error="Test extraction error",
-        )
+            # Verify result
+            assert result["status"] == "error"
+            assert result["document_id"] == "doc-456"
+            assert "Processing failed" in result["error"]
+
+            # Verify ProgressManager was used
+            mock_progress_manager_class.assert_called_once()
+            mock_progress_manager.report_status_to_backend.assert_called_once_with(
+                "processing"
+            )

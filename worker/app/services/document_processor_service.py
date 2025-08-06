@@ -31,29 +31,30 @@ def process_document(task_id: str, file_path: str, document_id: str) -> Dict[str
 
     # Create progress manager for live updates
     progress_manager = ProgressManager(
-        backend_url=BACKEND_URL,
-        document_id=document_id,
-        task_id=task_id
+        backend_url=BACKEND_URL, 
+        document_id=document_id, 
+        task_id=task_id,
+        operation_type="processing"
     )
 
     try:
         # Report processing started
         progress_manager.report_status_to_backend("processing")
-        
+
         # Use the new LlamaIndex workflow-based ingestor with progress tracking
         ingestor = DocumentIngestor(document_id, file_path, progress_manager)
         num_chunks = ingestor.ingest()
         logger.info(
             f"Successfully processed document {document_id} with {num_chunks} chunks"
         )
-        
+
         # Completion is handled by DocumentIngestor with chunks data
         return {"status": "success", "document_id": document_id, "chunks": num_chunks}
     except Exception as e:
         logger.error(
             f"Error processing document {document_id}: {str(e)}", exc_info=True
         )
-        
+
         # Error reporting is handled by DocumentIngestor
         return {"status": "error", "document_id": document_id, "error": str(e)}
 
