@@ -62,9 +62,7 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
                 "processing": ProcessingStatus.PROCESSING,
                 "pending": ProcessingStatus.PENDING,
             }
-            backend_status = status_mapping.get(
-                update.status, ProcessingStatus.PROCESSING
-            )
+            backend_status = status_mapping.get(update.status, ProcessingStatus.PROCESSING)
 
         # Update document status in backend database
         update_data: Dict[str, Any] = {"chunks_count": len(update.chunks)}
@@ -105,9 +103,7 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
                 # Don't fail the entire status update if chunk saving fails
 
         # Send WebSocket update to frontend
-        logger.info(
-            f"Sending WebSocket update for status: {update.status}"
-        )
+        logger.info(f"Sending WebSocket update for status: {update.status}")
 
         # Get WebSocket manager from router
         websocket_manager = getattr(router, "websocket_manager", None)
@@ -122,7 +118,7 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
             f"Operation: {update.operation_type}, Status: {update.status}, "
             f"Stage: {update.stage}, Message: {update.message}"
         )
-        
+
         if update.status == "completed" and update.operation_type == "processing":
             logger.info(f"Sending processing complete for task {update.task_id}")
             await websocket_manager.send_processing_complete(update.task_id, update.document_id)
@@ -130,13 +126,9 @@ async def receive_worker_status(update: WorkerStatusUpdate) -> Dict[str, str]:
             logger.info(f"Document deletion completed for {update.document_id}")
             await websocket_manager.send_document_deleted_success(update.document_id)
             # Delete the document record from database
-            logger.info(
-                f"Deleting document {update.document_id} from database"
-            )
+            logger.info(f"Deleting document {update.document_id} from database")
             await get_document_service().delete_document(update.document_id)
-            logger.info(
-                f"Successfully deleted document {update.document_id} from database"
-            )
+            logger.info(f"Successfully deleted document {update.document_id} from database")
         elif update.status == "failed":
             error_msg = update.error or "Processing failed"
             logger.error(f"Sending error notification for task {update.task_id}: " f"{error_msg}")
