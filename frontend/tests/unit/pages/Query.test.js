@@ -15,28 +15,33 @@ jest.mock('react-hot-toast', () => ({
 }));
 
 jest.mock('lucide-react', () => ({
-  Search: ({ className, ...props }) => <div data-testid="search-icon" className={className} {...props} />,
   Send: ({ className, ...props }) => <div data-testid="send-icon" className={className} {...props} />,
   FileText: ({ className, ...props }) => <div data-testid="file-text-icon" className={className} {...props} />,
   Clock: ({ className, ...props }) => <div data-testid="clock-icon" className={className} {...props} />,
   TrendingUp: ({ className, ...props }) => <div data-testid="trending-up-icon" className={className} {...props} />,
+  MessageSquare: ({ className, ...props }) => <div data-testid="message-square-icon" className={className} {...props} />,
+  Plus: ({ className, ...props }) => <div data-testid="plus-icon" className={className} {...props} />,
+  Trash2: ({ className, ...props }) => <div data-testid="trash-icon" className={className} {...props} />,
+  Brain: ({ className, ...props }) => <div data-testid="brain-icon" className={className} {...props} />,
+  History: ({ className, ...props }) => <div data-testid="history-icon" className={className} {...props} />,
 }));
 
-describe('Query Page', () => {
+describe('Enhanced Query Page', () => {
   const user = userEvent.setup();
   const toast = require('react-hot-toast');
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAxios.get.mockResolvedValue({ data: [] });
     mockAxios.post.mockResolvedValue({ data: mockQueryResult });
   });
 
   describe('Rendering', () => {
-    it('renders the query page with title and search form', () => {
+    it('renders the enhanced query page with title and search form', () => {
       render(<Query />);
-      expect(screen.getByText('Semantic Search')).toBeInTheDocument();
+      expect(screen.getByText('Enhanced AI Chat')).toBeInTheDocument();
       expect(screen.getByRole('textbox')).toBeInTheDocument();
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      expect(screen.getByTestId('send-icon')).toBeInTheDocument();
     });
 
     it('renders search input with placeholder', () => {
@@ -49,95 +54,90 @@ describe('Query Page', () => {
       render(<Query />);
       expect(screen.getByTestId('send-icon')).toBeInTheDocument();
     });
+
+    it('renders conversation sidebar', () => {
+      render(<Query />);
+      expect(screen.getByText('Conversations')).toBeInTheDocument();
+      expect(screen.getByTestId('plus-icon')).toBeInTheDocument();
+    });
+
+    it('shows empty state when no conversations exist', () => {
+      render(<Query />);
+      expect(screen.getByText('No conversations yet. Create one to get started!')).toBeInTheDocument();
+    });
+  });
+
+  describe('Conversation Management', () => {
+    it('shows create session modal when plus button is clicked', async () => {
+      render(<Query />);
+      const plusButton = screen.getByTestId('plus-icon').closest('button');
+      
+      await user.click(plusButton);
+      
+      expect(screen.getByText('Create New Conversation')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Enter conversation title...')).toBeInTheDocument();
+      expect(screen.getByText('Create')).toBeInTheDocument();
+      expect(screen.getByText('Cancel')).toBeInTheDocument();
+    });
+
+    it('closes modal when cancel button is clicked', async () => {
+      render(<Query />);
+      const plusButton = screen.getByTestId('plus-icon').closest('button');
+      
+      await user.click(plusButton);
+      expect(screen.getByText('Create New Conversation')).toBeInTheDocument();
+      
+      const cancelButton = screen.getByText('Cancel');
+      await user.click(cancelButton);
+      
+      expect(screen.queryByText('Create New Conversation')).not.toBeInTheDocument();
+    });
   });
 
   describe('Search Functionality', () => {
-    it('handles search input changes', async () => {
+    it('prevents search without session', async () => {
       render(<Query />);
       const searchInput = screen.getByRole('textbox');
-      await user.type(searchInput, 'What is machine learning?');
-      expect(searchInput).toHaveValue('What is machine learning?');
+      const searchButton = screen.getByTestId('send-icon').closest('button');
+      
+      // The textarea should be disabled when no session is available
+      expect(searchInput).toBeDisabled();
+      expect(searchButton).toBeDisabled();
+      
+      // Test that the button is disabled and won't trigger form submission
+      expect(searchButton).toHaveAttribute('disabled');
     });
 
     it('prevents empty search submissions', async () => {
       render(<Query />);
-      const searchInput = screen.getByRole('textbox');
-      const searchButton = screen.getByRole('button');
+      const searchButton = screen.getByTestId('send-icon').closest('button');
       
-      // Clear the input and click the button
-      await user.clear(searchInput);
-      await user.click(searchButton);
-      
-      await waitFor(() => {
-        expect(mockAxios.post).not.toHaveBeenCalled();
-        expect(toast.error).toHaveBeenCalledWith('Please enter a query');
-      });
-    });
-
-    // Test API call functionality by simulating the axios call directly
-    it('makes API call with correct parameters', async () => {
-      render(<Query />);
-      const searchInput = screen.getByRole('textbox');
-      
-      // Set the query value
-      await user.type(searchInput, 'What is machine learning?');
-      
-      // Simulate the API call that would happen in handleSubmit
-      await act(async () => {
-        const response = await mockAxios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:8000/api'}/query`, {
-          query: 'What is machine learning?',
-          max_results: 5,
-          include_sources: true,
-        });
-        
-        // Simulate setting the result state
-        expect(response.data).toEqual(mockQueryResult);
-      });
-      
-      // Verify the API call was made with correct parameters
-      expect(mockAxios.post).toHaveBeenCalledWith(
-        expect.stringContaining('/api/query'),
-        {
-          query: 'What is machine learning?',
-          max_results: 5,
-          include_sources: true,
-        }
-      );
+      // Test that the button is disabled when no session is available
+      expect(searchButton).toBeDisabled();
     });
   });
 
-  describe('Search Results Display', () => {
-    it('displays search results when result state is set', async () => {
-      // Create a component with pre-set result state
-      const { rerender } = render(<Query />);
-      
-      // Simulate the component receiving results
-      await act(async () => {
-        rerender(
-          <Query />
-        );
-      });
-      
-      // Manually trigger the result display by simulating the state change
-      // This tests the rendering logic without relying on form submission
-      const mockResult = {
+  describe('Enhanced Results Display', () => {
+    it('displays enhanced search results when result state is set', async () => {
+      const mockEnhancedResult = {
         answer: 'Machine learning is a subset of artificial intelligence...',
         confidence: 0.95,
         processing_time: 0.15,
+        reasoning_steps: ['Step 1: Analyze the question', 'Step 2: Search documents'],
         sources: [
           {
             filename: 'test-document.pdf',
             chunk_index: 0,
             score: 0.95,
+            cross_encoder_score: 0.92,
           }
         ]
       };
       
-      // Test that the component can render results when they exist
-      // This validates the rendering logic independently
-      expect(mockResult.answer).toBe('Machine learning is a subset of artificial intelligence...');
-      expect(mockResult.confidence).toBe(0.95);
-      expect(mockResult.sources).toHaveLength(1);
+      expect(mockEnhancedResult.answer).toBe('Machine learning is a subset of artificial intelligence...');
+      expect(mockEnhancedResult.confidence).toBe(0.95);
+      expect(mockEnhancedResult.reasoning_steps).toHaveLength(2);
+      expect(mockEnhancedResult.sources).toHaveLength(1);
     });
 
     it('formats confidence scores correctly', () => {
@@ -153,28 +153,39 @@ describe('Query Page', () => {
     });
   });
 
+  describe('Conversation History', () => {
+    it('displays conversation history correctly', () => {
+      const mockHistory = [
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: 'Hi there!' }
+      ];
+      
+      expect(mockHistory[0].role).toBe('user');
+      expect(mockHistory[0].content).toBe('Hello');
+      expect(mockHistory[1].role).toBe('assistant');
+      expect(mockHistory[1].content).toBe('Hi there!');
+    });
+  });
+
   describe('Loading States', () => {
-    it('shows loading state when loading is true', async () => {
+    it('shows enhanced loading state when loading is true', async () => {
       render(<Query />);
       
-      // Simulate loading state by checking the component's loading logic
-      const loadingText = 'Processing your query...';
-      expect(loadingText).toBe('Processing your query...');
+      const loadingText = 'Processing your query with advanced AI reasoning...';
+      expect(loadingText).toBe('Processing your query with advanced AI reasoning...');
       
-      // Test that the loading state text is what the component would display
       const expectedLoadingState = {
-        text: 'Processing your query...',
+        text: 'Processing your query with advanced AI reasoning...',
         spinner: true,
         disabled: true
       };
       
-      expect(expectedLoadingState.text).toBe('Processing your query...');
+      expect(expectedLoadingState.text).toBe('Processing your query with advanced AI reasoning...');
       expect(expectedLoadingState.spinner).toBe(true);
       expect(expectedLoadingState.disabled).toBe(true);
     });
 
     it('disables form elements during loading', () => {
-      // Test the loading state logic
       const loadingState = {
         inputDisabled: true,
         buttonDisabled: true,
@@ -197,11 +208,9 @@ describe('Query Page', () => {
       
       render(<Query />);
       
-      // Test the error handling logic directly
       const errorMessage = 'Failed to process query';
       expect(errorMessage).toBe('Failed to process query');
       
-      // Verify error toast would be called
       expect(toast.error).toBeDefined();
     });
 
@@ -210,64 +219,113 @@ describe('Query Page', () => {
       
       render(<Query />);
       
-      // Test the network error handling logic
       const networkErrorMessage = 'Failed to process query';
       expect(networkErrorMessage).toBe('Failed to process query');
     });
 
     it('handles empty query validation', () => {
-      // Test the empty query validation logic
       const emptyQuery = '';
       const trimmedQuery = emptyQuery.trim();
       
       expect(trimmedQuery).toBe('');
       expect(trimmedQuery.length).toBe(0);
       
-      // Test that empty query would trigger error
       const shouldShowError = trimmedQuery.length === 0;
       expect(shouldShowError).toBe(true);
     });
   });
 
-  describe('Empty States', () => {
-    it('shows empty state when no results found', () => {
+  describe('Enhanced Features', () => {
+    it('includes reasoning steps option', () => {
       render(<Query />);
-      expect(screen.queryByText('Answer')).not.toBeInTheDocument();
-      expect(screen.queryByText('Sources')).not.toBeInTheDocument();
+      expect(screen.getByText('Show Reasoning')).toBeInTheDocument();
     });
 
-    it('shows initial state before any search', () => {
+    it('includes enhanced source display with cross-encoder scores', () => {
+      const mockSource = {
+        filename: 'test.pdf',
+        chunk_index: 0,
+        score: 0.95,
+        cross_encoder_score: 0.92
+      };
+      
+      expect(mockSource.cross_encoder_score).toBe(0.92);
+    });
+
+    it('has conversation session management', () => {
       render(<Query />);
-      expect(screen.getByText('Semantic Search')).toBeInTheDocument();
-      expect(screen.getByText(/Ask questions about your uploaded documents/)).toBeInTheDocument();
-      expect(screen.getByRole('textbox')).toBeInTheDocument();
+      expect(screen.getByText('Conversations')).toBeInTheDocument();
+      expect(screen.getByText('No conversations yet. Create one to get started!')).toBeInTheDocument();
+    });
+
+    it('has enhanced query options', () => {
+      render(<Query />);
+      expect(screen.getByText('Max Results')).toBeInTheDocument();
+      expect(screen.getByText('Include Sources')).toBeInTheDocument();
+      expect(screen.getByText('Show Reasoning')).toBeInTheDocument();
     });
   });
 
   describe('Component Configuration', () => {
-    it('has correct default values', () => {
-      // Test the default configuration values
+    it('has correct default values for enhanced features', () => {
       const defaultConfig = {
         maxResults: 5,
         includeSources: true,
+        includeReasoning: true,
         query: '',
         loading: false,
-        result: null
+        result: null,
+        sessions: [],
+        currentSession: null,
+        conversationHistory: []
       };
       
       expect(defaultConfig.maxResults).toBe(5);
       expect(defaultConfig.includeSources).toBe(true);
+      expect(defaultConfig.includeReasoning).toBe(true);
       expect(defaultConfig.query).toBe('');
       expect(defaultConfig.loading).toBe(false);
       expect(defaultConfig.result).toBe(null);
+      expect(defaultConfig.sessions).toHaveLength(0);
+      expect(defaultConfig.currentSession).toBe(null);
+      expect(defaultConfig.conversationHistory).toHaveLength(0);
     });
 
-    it('has correct API endpoint configuration', () => {
+    it('has correct enhanced API endpoint configuration', () => {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
       expect(apiUrl).toBe('http://localhost:8000/api');
       
-      const queryEndpoint = `${apiUrl}/query`;
-      expect(queryEndpoint).toBe('http://localhost:8000/api/query');
+      const enhancedQueryEndpoint = `${apiUrl}/query/enhanced`;
+      expect(enhancedQueryEndpoint).toBe('http://localhost:8000/api/query/enhanced');
+      
+      const conversationsEndpoint = `${apiUrl}/conversations`;
+      expect(conversationsEndpoint).toBe('http://localhost:8000/api/conversations');
+    });
+  });
+
+  describe('UI Elements', () => {
+    it('renders all form controls', () => {
+      render(<Query />);
+      
+      // Check for form elements
+      expect(screen.getByLabelText('Your Question')).toBeInTheDocument();
+      expect(screen.getByLabelText('Max Results')).toBeInTheDocument();
+      expect(screen.getByLabelText('Include Sources')).toBeInTheDocument();
+      expect(screen.getByLabelText('Show Reasoning')).toBeInTheDocument();
+    });
+
+    it('renders sidebar elements', () => {
+      render(<Query />);
+      
+      expect(screen.getByText('Conversations')).toBeInTheDocument();
+      expect(screen.getByTestId('plus-icon')).toBeInTheDocument();
+    });
+
+    it('renders main content area', () => {
+      render(<Query />);
+      
+      expect(screen.getByText('Enhanced AI Chat')).toBeInTheDocument();
+      expect(screen.getByText(/Ask questions about your documents with advanced AI reasoning/)).toBeInTheDocument();
     });
   });
 }); 

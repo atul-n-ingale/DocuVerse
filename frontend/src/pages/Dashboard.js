@@ -9,6 +9,7 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  Brain,
 } from 'lucide-react';
 import axios from 'axios';
 import { API_URL } from '../api';
@@ -207,7 +208,7 @@ const Dashboard = () => {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <QuickActionCard
           title="Upload Documents"
           description="Add new documents to your collection"
@@ -221,6 +222,13 @@ const Dashboard = () => {
           icon={Search}
           href="/query"
           color="bg-green-500"
+        />
+        <QuickActionCard
+          title="AI Chat"
+          description="Advanced AI reasoning with conversation memory"
+          icon={Brain}
+          href="/enhanced-query"
+          color="bg-indigo-500"
         />
         <QuickActionCard
           title="Manage Documents"

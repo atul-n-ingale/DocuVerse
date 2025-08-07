@@ -55,6 +55,15 @@ requests = "2.32.4"
 beautifulsoup4 = "4.13.4"
 striprtf = "0.0.26"
 
+# Enhanced Q&A System Dependencies
+langgraph = "0.6.3"
+langchain = "0.3.27"
+langchain-openai = "^0.2.0"
+langchain-community = "^0.3.27"
+sentence-transformers = "^2.5.0"
+rank-bm25 = "0.2.2"
+tiktoken = "^0.7.0"
+
 [tool.poetry.group.dev.dependencies]
 # Testing
 pytest = "^8.0.0"
@@ -112,7 +121,12 @@ profile = "black"
 multi_line_output = 3
 line_length = 120
 known_first_party = ["app"]
-known_third_party = ["fastapi", "uvicorn", "celery", "redis", "pymongo", "motor", "pydantic", "websockets", "llama_index", "openai", "pinecone"]
+known_third_party = [
+    "fastapi", "uvicorn", "celery", "redis", "pymongo", "motor", "pydantic", 
+    "websockets", "llama_index", "openai", "pinecone", "langgraph", "langchain", 
+    "langchain_openai", "langchain_community", "sentence_transformers", 
+    "rank_bm25", "tiktoken"
+]
 
 # Ruff configuration (modern, fast linter)
 [tool.ruff]
@@ -402,6 +416,14 @@ module = [
     "llama_index_instrumentation.*",
     "llama_index_embeddings_openai.*",
     "llama_index_vector_stores_pinecone.*",
+    # Enhanced Q&A System modules
+    "langgraph.*",
+    "langchain.*",
+    "langchain_openai.*",
+    "langchain_community.*",
+    "sentence_transformers.*",
+    "rank_bm25.*",
+    "tiktoken.*",
 ]
 ignore_missing_imports = true
 disallow_untyped_defs = false
