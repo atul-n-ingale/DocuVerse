@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FileText, Upload, Search, Database } from 'lucide-react';
+import { FileText, Upload, Search, Database, Brain } from 'lucide-react';
 
 const Navbar = () => {
   const location = useLocation();
@@ -8,7 +8,7 @@ const Navbar = () => {
   const navItems = [
     { path: '/', label: 'Dashboard', icon: FileText },
     { path: '/upload', label: 'Upload', icon: Upload },
-    { path: '/query', label: 'Query', icon: Search },
+    { path: '/query', label: 'AI Chat', icon: Brain },
     { path: '/documents', label: 'Documents', icon: Database },
   ];
 

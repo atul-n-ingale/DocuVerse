@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import documents, query, upload, worker
+from app.api.routes import documents, enhanced_query, query, upload, worker
 from app.core.database import close_mongo_connection, connect_to_mongo
 from app.core.websocket_manager import WebSocketManager
 
@@ -23,6 +23,7 @@ websocket_manager = WebSocketManager()
 # Include API routes
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(query.router, prefix="/api", tags=["query"])
+app.include_router(enhanced_query.router, prefix="/api", tags=["enhanced-query"])
 
 # Pass WebSocket manager to documents router
 documents.router.websocket_manager = websocket_manager

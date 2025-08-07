@@ -6,7 +6,7 @@ import Navbar from '../../../src/components/Navbar';
 jest.mock('lucide-react', () => ({
   FileText: ({ className, ...props }) => <div data-testid="file-text-icon" className={className} {...props} />,
   Upload: ({ className, ...props }) => <div data-testid="upload-icon" className={className} {...props} />,
-  Search: ({ className, ...props }) => <div data-testid="search-icon" className={className} {...props} />,
+  Brain: ({ className, ...props }) => <div data-testid="brain-icon" className={className} {...props} />,
   Database: ({ className, ...props }) => <div data-testid="database-icon" className={className} {...props} />,
 }));
 
@@ -40,7 +40,7 @@ describe('Navbar Component', () => {
       
       expect(screen.getAllByText('Dashboard')).toHaveLength(2); // Desktop + Mobile
       expect(screen.getAllByText('Upload')).toHaveLength(2);
-      expect(screen.getAllByText('Query')).toHaveLength(2);
+      expect(screen.getAllByText('AI Chat')).toHaveLength(2);
       expect(screen.getAllByText('Documents')).toHaveLength(2);
     });
 
@@ -49,7 +49,7 @@ describe('Navbar Component', () => {
       
       expect(screen.getAllByTestId('file-text-icon')).toHaveLength(3); // Logo + 2 Dashboard
       expect(screen.getAllByTestId('upload-icon')).toHaveLength(2); // Desktop + Mobile
-      expect(screen.getAllByTestId('search-icon')).toHaveLength(2);
+      expect(screen.getAllByTestId('brain-icon')).toHaveLength(2);
       expect(screen.getAllByTestId('database-icon')).toHaveLength(2);
     });
   });
@@ -61,12 +61,12 @@ describe('Navbar Component', () => {
       // Check desktop links (first of each type)
       const dashboardLinks = screen.getAllByRole('link', { name: /dashboard/i });
       const uploadLinks = screen.getAllByRole('link', { name: /upload/i });
-      const queryLinks = screen.getAllByRole('link', { name: /query/i });
+      const aiChatLinks = screen.getAllByRole('link', { name: /ai chat/i });
       const documentsLinks = screen.getAllByRole('link', { name: /documents/i });
       
       expect(dashboardLinks[0]).toHaveAttribute('href', '/');
       expect(uploadLinks[0]).toHaveAttribute('href', '/upload');
-      expect(queryLinks[0]).toHaveAttribute('href', '/query');
+      expect(aiChatLinks[0]).toHaveAttribute('href', '/query');
       expect(documentsLinks[0]).toHaveAttribute('href', '/documents');
     });
 
@@ -103,8 +103,8 @@ describe('Navbar Component', () => {
       mockLocation.pathname = '/query';
       render(<Navbar />);
       
-      const queryLinks = screen.getAllByRole('link', { name: /query/i });
-      queryLinks.forEach(link => {
+      const aiChatLinks = screen.getAllByRole('link', { name: /ai chat/i });
+      aiChatLinks.forEach(link => {
         expect(link).toHaveClass('bg-blue-100', 'text-blue-700');
       });
     });
